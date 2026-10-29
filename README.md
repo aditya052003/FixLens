@@ -15,16 +15,15 @@ Double-click `Open-FixLens-Demo.cmd` to start the local server and open FixLens 
    npm install
    ```
 
-3. Set your Meta Model API key and start the server in that same PowerShell window:
+3. In the Meta Model API dashboard, create a key and copy it from the one-time key dialog. In this folder, run:
 
    ```powershell
-   $env:MODEL_API_KEY = "paste your Meta Model API key here"
-   node .\server.mjs
+   .\Start-FixLens.ps1
    ```
 
-4. Keep PowerShell open and visit `http://localhost:4173` in a regular browser.
+   The launcher reads the copied key from the clipboard, clears the clipboard, and starts the server. It does not print or save the key in the project. Keep PowerShell open and visit `http://localhost:4173` in a regular browser.
 
-Without a key, the interface uses a clearly labeled example plan; it does not analyze the uploaded photo. Live analysis needs internet access and Meta Model API credits. The key stays on the server. Do not place it in browser code or commit it.
+If the key-creation dialog fails, do not run the launcher until Meta successfully creates a key. Without a key, the interface uses a clearly labeled example plan; it does not analyze the uploaded photo. Live analysis needs internet access and Meta Model API credits. Never place the key in browser code, messages, screenshots, or the repository.
 
 ## Live flow
 

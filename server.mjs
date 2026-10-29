@@ -24,6 +24,17 @@ function redactSecrets(value) {
     .replace(/\bBearer\s+\S+/gi, 'Bearer [REDACTED]');
 }
 
+function getApiKey() {
+  // API keys contain no whitespace or formatting characters; remove accidental
+  // copy/paste line breaks and invisible Unicode marks before building headers.
+  const key = String(process.env.MODEL_API_KEY || '').replace(/[\s\p{C}]+/gu, '');
+  if (!key) throw new Error('MODEL_API_KEY is empty. Restart FixLens and enter the Meta key again.');
+  if (/[^\x21-\x7E]/.test(key) || /\s/.test(key)) {
+    throw new Error('MODEL_API_KEY contains spaces or unsupported characters. Re-enter only the key itself.');
+  }
+  return key;
+}
+
 async function* responseEvents(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -64,7 +75,7 @@ async function analyzeWithSpark({ image, issue, bike, note }) {
   const prompt = `You are FixLens, a cautious bicycle repair helper. Analyze the user's bike photo and context. Never claim certainty from a photo. Give safe, practical beginner guidance. If the image is not a bicycle or the issue is unclear, say so and ask them to consult a mechanic rather than inventing a diagnosis. Do not instruct riding an unsafe bike. Context: reported issue=${issue}; bike type=${bike}; extra detail=${note || 'none'}. Return only valid JSON with keys title, summary, confidence, component, steps (array of 3-5 objects each with title and detail), safety. Set component to exactly one of: "bicycle tire", "bicycle chain", "bicycle brake", "bicycle wheel", or "other bicycle part". Choose the visible part most relevant to the reported symptom. Keep steps concise. Include stop/seek-mechanic conditions in safety.`;
   const response = await fetch('https://api.meta.ai/v1/responses', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.MODEL_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(90_000),
     body: JSON.stringify({
       model: 'muse-spark-1.3', reasoning: { effort: 'medium' },
@@ -93,7 +104,7 @@ function samPromptCandidates(component) {
 async function analyzeWithSam({ image, prompt, width, height }) {
   const response = await fetch('https://api.meta.ai/v1/responses', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.MODEL_API_KEY}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { Authorization: `Bearer ${getApiKey()}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
     signal: AbortSignal.timeout(90_000),
     body: JSON.stringify({
       model: 'sam-3.1',
@@ -136,7 +147,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/api/diagnose') {
     res.writeHead(404); res.end('Not found'); return;
   }
-  if (!process.env.MODEL_API_KEY) {
+  if (!String(process.env.MODEL_API_KEY || '').trim()) {
     json(res, 503, { error: 'MODEL_API_KEY is not set on the server.' }); return;
   }
   let body = '';
@@ -190,8 +201,18 @@ const server = http.createServer(async (req, res) => {
     }
     json(res, 200, diagnosis);
   } catch (err) {
-    console.error('FixLens request failed:', err.message || 'unknown error');
-    json(res, 502, { error: err.message || 'Could not analyze this image.' });
+    const parts = [];
+    let current = err;
+    for (let depth = 0; current && depth < 4; depth += 1, current = current.cause) {
+      const fields = [current.name, current.message];
+      if (current.code) fields.push(`code=${current.code}`);
+      if (current.syscall) fields.push(`syscall=${current.syscall}`);
+      if (current.hostname) fields.push(`host=${current.hostname}`);
+      parts.push(fields.filter(Boolean).join(' '));
+    }
+    const safeDetail = redactSecrets(parts.join(' <- ') || 'unknown error').slice(0, 500);
+    console.error('FixLens request failed:', safeDetail);
+    json(res, 502, { error: `Meta request failed: ${safeDetail}` });
   }
 });
 server.listen(port, () => console.log(`FixLens ready at http://localhost:${port}`));
