@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { decodeMaskToSVGPath, parseImageStream, recordsOfKind } from '@meta-sam/parser';
+import { buildObjectPrompt, decodeMaskToSVGPath, parseImageStream, recordsOfKind } from '@meta-sam/parser';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4173);
@@ -148,6 +148,14 @@ const server = http.createServer(async (req, res) => {
     const input = JSON.parse(body);
     if (typeof input.image !== 'string' || !input.image.startsWith('data:image/')) throw new Error('Please upload an image.');
     if (!Number.isInteger(input.width) || !Number.isInteger(input.height) || input.width < 1 || input.height < 1) throw new Error('The photo dimensions could not be read. Please upload it again.');
+    let point = null;
+    if (input.point !== undefined && input.point !== null) {
+      point = input.point;
+      if (!point || !Number.isInteger(point.x) || !Number.isInteger(point.y)
+        || point.x < 0 || point.y < 0 || point.x >= input.width || point.y >= input.height) {
+        throw new Error('The selected point is outside the photo. Tap the photo again.');
+      }
+    }
     const diagnosis = await analyzeWithSpark(input);
     const allowed = new Set(['bicycle tire', 'bicycle chain', 'bicycle brake', 'bicycle wheel', 'other bicycle part']);
     if (!allowed.has(diagnosis.component)) {
@@ -155,14 +163,26 @@ const server = http.createServer(async (req, res) => {
         : input.issue.toLowerCase().includes('brake') ? 'bicycle brake' : 'bicycle tire';
     }
     try {
-      const prompts = samPromptCandidates(diagnosis.component);
-      const attemptedPrompts = [];
-      for (const prompt of prompts) {
-        attemptedPrompts.push(prompt);
+      if (point) {
+        const prompt = buildObjectPrompt({
+          size: { width: input.width, height: input.height },
+          objects: [{ id: 1, prompts: [{ points: [{ x: point.x, y: point.y }] }] }]
+        });
         diagnosis.sam = await analyzeWithSam({ ...input, prompt });
-        if (diagnosis.sam.status === 'complete') break;
+        diagnosis.sam.promptMode = 'point';
+        diagnosis.sam.prompt = diagnosis.component;
+        diagnosis.sam.target = point;
+      } else {
+        const prompts = samPromptCandidates(diagnosis.component);
+        const attemptedPrompts = [];
+        for (const prompt of prompts) {
+          attemptedPrompts.push(prompt);
+          diagnosis.sam = await analyzeWithSam({ ...input, prompt });
+          if (diagnosis.sam.status === 'complete') break;
+        }
+        diagnosis.sam.promptMode = 'concept';
+        diagnosis.sam.attemptedPrompts = attemptedPrompts;
       }
-      diagnosis.sam.attemptedPrompts = attemptedPrompts;
     } catch (err) {
       const detail = redactSecrets(err instanceof Error ? err.message : String(err)).slice(0, 500);
       console.error('[FixLens] SAM 3.1 failed:', detail);
