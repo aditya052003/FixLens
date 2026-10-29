@@ -88,10 +88,9 @@ The Meta API key stays on the local server side; it is not embedded in the brows
 - Node.js — local server and Meta API calls
 - HTML, CSS, and JavaScript — browser interface
 
-## Project
+## Repository
 
 - Public repository: [github.com/aditya052003/FixLens](https://github.com/aditya052003/FixLens)
-- Hackathon submission and demo video: add the final links here after submission materials are ready.
 
 ---
 
